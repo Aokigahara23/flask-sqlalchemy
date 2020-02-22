@@ -2,17 +2,17 @@
 from __future__ import absolute_import
 
 import functools
-import os
 import sys
 import time
-import warnings
 from math import ceil
-from operator import itemgetter
 from threading import Lock
 
+import os
 import sqlalchemy
+import warnings
 from flask import _app_ctx_stack, abort, current_app, request
 from flask.signals import Namespace
+from operator import itemgetter
 from sqlalchemy import event, inspect, orm
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.declarative import DeclarativeMeta, declarative_base
@@ -20,9 +20,9 @@ from sqlalchemy.orm.exc import UnmappedClassError
 from sqlalchemy.orm.session import Session as SessionBase
 
 from flask_sqlalchemy.model import Model
+from . import utils
 from ._compat import itervalues, string_types, xrange
 from .model import DefaultMeta
-from . import utils
 
 __version__ = "3.0.0.dev"
 
@@ -48,6 +48,7 @@ def _make_table(db):
         info.setdefault('bind_key', None)
         kwargs['info'] = info
         return sqlalchemy.Table(*args, **kwargs)
+
     return _make_table
 
 
@@ -66,6 +67,7 @@ def _wrap_with_default_query_class(fn, cls):
                 backref = (backref, {})
             _set_default_query_class(backref[1], cls)
         return fn(*args, **kwargs)
+
     return newfn
 
 
@@ -251,13 +253,13 @@ class _EngineDebuggingSignalEvents(object):
         )
 
     def before_cursor_execute(
-        self, conn, cursor, statement, parameters, context, executemany
+            self, conn, cursor, statement, parameters, context, executemany
     ):
         if current_app:
             context._query_start_time = _timer()
 
     def after_cursor_execute(
-        self, conn, cursor, statement, parameters, context, executemany
+            self, conn, cursor, statement, parameters, context, executemany
     ):
         if current_app:
             try:
@@ -400,9 +402,9 @@ class Pagination(object):
         last = 0
         for num in xrange(1, self.pages + 1):
             if num <= left_edge or \
-               (num > self.page - left_current - 1 and
-                num < self.page + right_current) or \
-               num > self.pages - right_edge:
+                    (num > self.page - left_current - 1 and
+                     num < self.page + right_current) or \
+                    num > self.pages - right_edge:
                 if last + 1 != num:
                     yield None
                 yield num
@@ -722,13 +724,17 @@ class SQLAlchemy(object):
         self.app = app
         self._engine_options = engine_options or {}
         _include_sqlalchemy(self, query_class)
+        self.external_bases = []
 
         if app is not None:
             self.init_app(app)
 
     @property
     def metadata(self):
-        """The metadata associated with ``db.Model``."""
+        """The metadata associated with ``db.Model``.
+        Access to raw SQLA models added using register_base should
+        be referenced directly using it's own declarative base.
+        """
 
         return self.Model.metadata
 
@@ -815,8 +821,8 @@ class SQLAlchemy(object):
         # applications. If the app is passed in the constructor,
         # we set it and don't support multiple applications.
         if not (
-            app.config.get('SQLALCHEMY_DATABASE_URI')
-            or app.config.get('SQLALCHEMY_BINDS')
+                app.config.get('SQLALCHEMY_DATABASE_URI')
+                or app.config.get('SQLALCHEMY_BINDS')
         ):
             raise RuntimeError('Either SQLALCHEMY_DATABASE_URI '
                                'or SQLALCHEMY_BINDS needs to be set.')
@@ -856,6 +862,7 @@ class SQLAlchemy(object):
             value = app.config[configkey]
             if value is not None:
                 options[optionkey] = value
+
         _setdefault('pool_size', 'SQLALCHEMY_POOL_SIZE')
         _setdefault('pool_timeout', 'SQLALCHEMY_POOL_TIMEOUT')
         _setdefault('pool_recycle', 'SQLALCHEMY_POOL_RECYCLE')
@@ -984,9 +991,10 @@ class SQLAlchemy(object):
     def get_tables_for_bind(self, bind=None):
         """Returns a list of all tables relevant for a bind."""
         result = []
-        for table in itervalues(self.Model.metadata.tables):
-            if table.info.get('bind_key') == bind:
-                result.append(table)
+        for Base in self.bases:
+            for table in itervalues(Base.metadata.tables):
+                if table.info.get('bind_key') == bind:
+                    result.append(table)
         return result
 
     def get_binds(self, app=None):
@@ -1013,13 +1021,14 @@ class SQLAlchemy(object):
         else:
             binds = bind
 
-        for bind in binds:
-            extra = {}
-            if not skip_tables:
-                tables = self.get_tables_for_bind(bind)
-                extra['tables'] = tables
-            op = getattr(self.Model.metadata, operation)
-            op(bind=self.get_engine(app, bind), **extra)
+        for Base in self.bases:
+            for bind in binds:
+                extra = {}
+                if not skip_tables:
+                    tables = self.get_tables_for_bind(bind)
+                    extra['tables'] = tables
+                op = getattr(Base.metadata, operation)
+                op(bind=self.get_engine(app, bind), **extra)
 
     def create_all(self, bind='__all__', app=None):
         """Creates all tables.
@@ -1049,7 +1058,24 @@ class SQLAlchemy(object):
         return '<%s engine=%r>' % (
             self.__class__.__name__,
             self.engine.url if self.app or current_app else None
-        )
+
+                                                            @ property
+
+    def bases(self):
+        return [self.Model] + self.external_bases
+
+    def register_base(self, Base):
+        """Register an external raw SQLAlchemy declarative base.
+        Allows usage of the base with our session management and
+        adds convenience query property using self.Query by default."""
+
+        self.external_bases.append(Base)
+        for c in Base._decl_class_registry.values():
+            if isinstance(c, type):
+                if not hasattr(c, 'query') and not hasattr(c, 'query_class'):
+                    c.query_class = self.Query
+                if not hasattr(c, 'query'):
+                    c.query = _QueryProperty(self)
 
 
 class _BoundDeclarativeMeta(DefaultMeta):
