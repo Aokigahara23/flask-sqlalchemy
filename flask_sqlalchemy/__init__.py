@@ -2,17 +2,17 @@
 from __future__ import absolute_import
 
 import functools
+import os
 import sys
 import time
+import warnings
 from math import ceil
+from operator import itemgetter
 from threading import Lock
 
-import os
 import sqlalchemy
-import warnings
 from flask import _app_ctx_stack, abort, current_app, request
 from flask.signals import Namespace
-from operator import itemgetter
 from sqlalchemy import event, inspect, orm
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.declarative import DeclarativeMeta, declarative_base
@@ -1058,9 +1058,9 @@ class SQLAlchemy(object):
         return '<%s engine=%r>' % (
             self.__class__.__name__,
             self.engine.url if self.app or current_app else None
+        )
 
-                                                            @ property
-
+    @property
     def bases(self):
         return [self.Model] + self.external_bases
 
